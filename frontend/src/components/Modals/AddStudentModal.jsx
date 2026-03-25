@@ -40,15 +40,18 @@ const AddStudentModal = ({ isOpen, onClose, onSubmit }) => {
   const [loading, setLoading] = useState(false);
   const [generatingRollNumber, setGeneratingRollNumber] = useState(false);
 
-  // Auto-generate roll number when class/section changes
+  // Auto-generate roll number when class/section changes (only if roll number is empty)
   useEffect(() => {
-    if (formData.section && isOpen) {
-      generateRollNumber();
+    if (formData.section && isOpen && !formData.rollNumber) {
+      generateRollNumber(false);
     }
   }, [formData.section, isOpen]);
 
-  const generateRollNumber = async () => {
+  const generateRollNumber = async (showToast = true) => {
     if (!formData.section) {
+      if (showToast) {
+        toast.error('Please select a class/section first');
+      }
       return;
     }
 
@@ -62,10 +65,14 @@ const AddStudentModal = ({ isOpen, onClose, onSubmit }) => {
         rollNumber: nextRollNumber
       }));
       
-      toast.success(`Roll number ${nextRollNumber} assigned`);
+      if (showToast) {
+        toast.success(`Roll number ${nextRollNumber} assigned`);
+      }
     } catch (error) {
       console.error('Error generating roll number:', error);
-      toast.error('Failed to generate roll number');
+      if (showToast) {
+        toast.error('Failed to generate roll number');
+      }
     } finally {
       setGeneratingRollNumber(false);
     }
@@ -184,6 +191,13 @@ const AddStudentModal = ({ isOpen, onClose, onSubmit }) => {
       onClose();
     } catch (error) {
       console.error('Error submitting:', error);
+      // Check for duplicate roll number error
+      if (error.response?.data?.message?.includes('rollNumber') || 
+          error.response?.data?.message?.includes('duplicate') ||
+          error.response?.data?.message?.includes('E11000')) {
+        toast.error('This roll number is already assigned to another student. Please use a different roll number.');
+      }
+      // Error is already handled in the parent component, but we can add specific handling here
     } finally {
       setLoading(false);
     }
@@ -281,25 +295,31 @@ const AddStudentModal = ({ isOpen, onClose, onSubmit }) => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Roll Number <span className="text-red-500">*</span>
-                    <span className="text-xs text-gray-500 ml-2">(Auto-generated)</span>
+                    <span className="text-xs text-gray-500 ml-2">(Auto-generated, editable)</span>
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      name="rollNumber"
-                      value={formData.rollNumber}
-                      readOnly
-                      className="input bg-gray-50 cursor-not-allowed"
-                      placeholder="Select class first"
-                    />
-                    {generatingRollNumber && (
-                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                        <RefreshCw className="w-4 h-4 text-primary-600 animate-spin" />
-                      </div>
-                    )}
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        name="rollNumber"
+                        value={formData.rollNumber}
+                        onChange={handleInputChange}
+                        className="input"
+                        placeholder="Select class first or enter manually"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={generateRollNumber}
+                      disabled={!formData.section || generatingRollNumber}
+                      className="btn-outline flex items-center gap-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Regenerate roll number"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${generatingRollNumber ? 'animate-spin' : ''}`} />
+                    </button>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Roll number is automatically assigned based on class
+                    Auto-assigned when class is selected. You can edit or regenerate it.
                   </p>
                 </div>
 

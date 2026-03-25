@@ -123,6 +123,17 @@ export const getStudentById = asyncHandler(async (req, res, next) => {
 export const createStudent = asyncHandler(async (req, res, next) => {
   const studentData = { ...req.body };
 
+  // Check if roll number already exists
+  if (studentData.rollNumber) {
+    const existingStudent = await Student.findOne({ 
+      rollNumber: studentData.rollNumber.toUpperCase().trim() 
+    });
+    
+    if (existingStudent) {
+      return next(new AppError(`Roll number ${studentData.rollNumber} is already assigned to ${existingStudent.firstName} ${existingStudent.lastName}`, 400));
+    }
+  }
+
   // Handle photo upload if present
   if (req.files && req.files.photo) {
     const photoResult = await uploadImage(
@@ -171,6 +182,18 @@ export const updateStudent = asyncHandler(async (req, res, next) => {
   }
 
   const updateData = { ...req.body };
+
+  // Check if roll number is being changed and if it already exists
+  if (updateData.rollNumber && updateData.rollNumber !== student.rollNumber) {
+    const existingStudent = await Student.findOne({ 
+      rollNumber: updateData.rollNumber.toUpperCase().trim(),
+      _id: { $ne: req.params.id } // Exclude current student
+    });
+    
+    if (existingStudent) {
+      return next(new AppError(`Roll number ${updateData.rollNumber} is already assigned to ${existingStudent.firstName} ${existingStudent.lastName}`, 400));
+    }
+  }
 
   // Handle photo upload if present
   if (req.files && req.files.photo) {

@@ -4,9 +4,9 @@
   --bg-primary: #0f172a;        /* slate-900 - softer dark background */
   --bg-secondary: #1e293b;      /* slate-800 - elevated surfaces */
   --bg-tertiary: #334155;       /* slate-700 - hover states */
-  --text-primary: #f1f5f9;      /* slate-100 - primary text */
-  --text-secondary: #cbd5e1;    /* slate-300 - secondary text */
-  --text-tertiary: #94a3b8;     /* slate-400 - muted text */
+  --text-primary: #0f172a;      /* slate-900 - very dark for white backgrounds */
+  --text-secondary: #1e293b;    /* slate-800 - dark secondary text */
+  --text-tertiary: #334155;     /* slate-700 - dark muted text */
   --border-primary: #334155;    /* slate-700 - subtle borders */
   --border-secondary: #475569;  /* slate-600 - prominent borders */
   --accent-primary: #3b82f6;    /* blue-500 - matches light mode primary */

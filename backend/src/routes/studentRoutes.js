@@ -158,13 +158,14 @@ router.post('/bulk-upload', upload.single('file'), handleMulterError, async (req
         // If "Roll no." has numeric data but not sequential 1,2,3, it might be academic score
 
         // Support both "firstName"/"lastName" and combined "name" field
-        let firstName = getField('firstName', 'firstname');
-        let lastName = getField('lastName', 'lastname');
+        let firstName = getField('firstName', 'firstname', 'first name');
+        let lastName = getField('lastName', 'lastname', 'last name');
 
-        const fullName = getField('name', 'studentName', 'student name');
+        // Try to find name in various column name variations (including truncated ones from Excel)
+        const fullName = getField('name', 'studentName', 'student name', 'studentna', 'student na', 'studentname');
         if (!firstName && !lastName && fullName) {
-          const nameParts = String(fullName).trim().split(' ');
-          firstName = nameParts[0];
+          const nameParts = String(fullName).trim().split(/\s+/);
+          firstName = nameParts[0] || 'Student';
           lastName = nameParts.slice(1).join(' ') || 'Student';
         }
 
@@ -185,7 +186,7 @@ router.post('/bulk-upload', upload.single('file'), handleMulterError, async (req
         }
 
         // Generate a roll number if not provided
-        let rollNumber = getField('rollNumber', 'rollno', 'roll', 'roll number', 'Roll no.');
+        let rollNumber = getField('rollNumber', 'rollno', 'roll', 'roll number', 'Roll no.', 'Roll No', 'RollNo', 'rollno.');
         
         // Check for roll number in unheaded column (xlsx creates keys like "__EMPTY", "__EMPTY_1", etc.)
         if (!rollNumber) {
@@ -232,10 +233,12 @@ router.post('/bulk-upload', upload.single('file'), handleMulterError, async (req
         if (i === 0) {
           logger.info(`📋 First row sample - Raw keys: ${Object.keys(rawRow).join(', ')}`);
           logger.info(`📋 Raw row values: ${JSON.stringify(rawRow)}`);
+          logger.info(`📋 Normalized row keys: ${Object.keys(row).join(', ')}`);
         }
 
         if (!firstName || !lastName) {
-          throw new Error('Missing required fields: name / firstName + lastName');
+          logger.error(`❌ Row ${i + 1}: Missing name fields. Found keys: ${Object.keys(rawRow).join(', ')}`);
+          throw new Error(`Row ${i + 1}: Missing required fields: name / firstName + lastName. Found: ${firstName || 'missing'} ${lastName || 'missing'}`);
         }
 
         // Check for duplicate roll number
@@ -345,10 +348,42 @@ router.post('/bulk-upload', upload.single('file'), handleMulterError, async (req
         // Helper function to validate and clean phone numbers
         const cleanPhone = (phoneValue) => {
           if (!phoneValue) return '0000000000';
-          const phoneStr = String(phoneValue).replace(/\D/g, ''); // Remove non-digits
+          
+          // Handle scientific notation (e.g., 9.88E+09)
+          let phoneStr = String(phoneValue);
+          if (phoneStr.includes('E+') || phoneStr.includes('e+')) {
+            // Convert from scientific notation
+            const numValue = parseFloat(phoneStr);
+            if (!isNaN(numValue)) {
+              phoneStr = Math.round(numValue).toString();
+            }
+          }
+          
+          // Remove non-digits
+          phoneStr = phoneStr.replace(/\D/g, '');
+          
+          // Handle 11-digit numbers (with country code starting with 91 for India)
+          if (phoneStr.length === 11 && phoneStr.startsWith('91')) {
+            phoneStr = phoneStr.substring(2);
+          }
+          
+          // Handle 12-digit numbers (with country code starting with 91 for India)
+          if (phoneStr.length === 12 && phoneStr.startsWith('91')) {
+            phoneStr = phoneStr.substring(2);
+          }
+          
           if (phoneStr.length === 10 && /^\d{10}$/.test(phoneStr)) {
             return phoneStr;
           }
+          
+          // If still not 10 digits, try to extract last 10 digits
+          if (phoneStr.length > 10) {
+            phoneStr = phoneStr.slice(-10);
+            if (/^\d{10}$/.test(phoneStr)) {
+              return phoneStr;
+            }
+          }
+          
           return '0000000000';
         };
 
@@ -368,23 +403,77 @@ router.post('/bulk-upload', upload.single('file'), handleMulterError, async (req
           section: sectionValue,
           email: getField('email', 'studentEmail', 'student email')?.toLowerCase().trim() || undefined,
           phone: cleanPhone(getField('phone', 'studentPhone', 'student phone')),
-          dateOfBirth: getField('dateOfBirth', 'dob', 'date of birth') ? new Date(getField('dateOfBirth', 'dob', 'date of birth')) : new Date('2010-01-01'),
+          dateOfBirth: (() => {
+            const dobField = getField('dateOfBirth', 'dob', 'date of birth', 'dateofbir', 'date of bir');
+            if (!dobField) return new Date('2010-01-01');
+            
+            // Handle Excel date serial numbers (Excel stores dates as numbers)
+            const dobValue = String(dobField).trim();
+            
+            // If it's a number (Excel serial date), convert it
+            if (!isNaN(dobValue) && !dobValue.includes('-') && !dobValue.includes('/')) {
+              try {
+                // Excel serial date: days since January 1, 1900
+                const excelSerialDate = parseFloat(dobValue);
+                if (excelSerialDate > 1 && excelSerialDate < 100000) {
+                  // Convert Excel serial date to JavaScript date
+                  const excelEpoch = new Date(1899, 11, 30); // Excel epoch
+                  const jsDate = new Date(excelEpoch.getTime() + excelSerialDate * 86400000);
+                  if (!isNaN(jsDate.getTime())) {
+                    return jsDate;
+                  }
+                }
+              } catch (e) {
+                logger.warn(`Failed to parse Excel date serial number: ${dobValue}`);
+              }
+            }
+            
+            // Try parsing as standard date string
+            try {
+              const parsedDate = new Date(dobField);
+              if (!isNaN(parsedDate.getTime())) {
+                return parsedDate;
+              }
+            } catch (e) {
+              // Fall through to default
+            }
+            
+            return new Date('2010-01-01');
+          })(),
           dateOfAdmission: getField('dateOfAdmission', 'admission date') ? new Date(getField('dateOfAdmission', 'admission date')) : new Date(),
           gender: getValue(getField('gender'), 'Male'),
           bloodGroup: getField('bloodGroup', 'blood group') || undefined,
 
-          // Address
-          address: {
-            street: getValue(getField('street', 'address', 'address street'), 'N/A'),
-            city: getValue(getField('city', 'address city'), 'N/A'),
-            state: getValue(getField('state', 'address state'), 'N/A'),
-            pincode: getValue(getField('pincode', 'pin code', 'address pincode'), '000000')
-          },
+          // Address - handle single address field or separate fields
+          address: (() => {
+            const addressField = getField('address', 'Address');
+            const streetField = getField('street', 'address street');
+            const cityField = getField('city', 'address city', 'City');
+            const stateField = getField('state', 'address state', 'State');
+            const pincodeField = getField('pincode', 'pin code', 'address pincode', 'Pincode');
+            
+            // If address is a single field (like "Delhi"), use it as city
+            if (!cityField && addressField && addressField !== 'N/A') {
+              return {
+                street: getValue(streetField, addressField),
+                city: getValue(cityField, addressField),
+                state: getValue(stateField, 'N/A'),
+                pincode: getValue(pincodeField, '000000')
+              };
+            }
+            
+            return {
+              street: getValue(streetField, addressField || 'N/A'),
+              city: getValue(cityField, 'N/A'),
+              state: getValue(stateField, 'N/A'),
+              pincode: getValue(pincodeField, '000000')
+            };
+          })(),
 
           // Father Information
           father: {
-            name: getValue(getField('fatherName', 'father name', 'parentName', 'parent name'), 'N/A'),
-            phone: cleanPhone(getField('fatherPhone', 'father phone', 'parentPhone', 'parent phone')),
+            name: getValue(getField('fatherName', 'father name', 'parentName', 'parent name', 'parentnai', 'parent nai', 'parentname'), 'N/A'),
+            phone: cleanPhone(getField('fatherPhone', 'father phone', 'parentPhone', 'parent phone', 'parentcor', 'parent cor', 'parentcontact')),
             email: getField('fatherEmail', 'father email', 'parentEmail', 'parent email')?.toLowerCase().trim() || undefined,
             occupation: getValue(getField('fatherOccupation', 'father occupation'), 'N/A'),
             education: getField('fatherEducation', 'father education') || undefined,
@@ -751,14 +840,22 @@ router.get('/:id', async (req, res) => {
     }
 
     // Transform data to match frontend expectations
+    const attendanceValue = student.attendancePercentage || 100;
+    const academicValue = student.overallPercentage || 0;
+    
     const transformedStudent = {
       id: student._id,
       firstName: student.firstName,
       lastName: student.lastName,
+      middleName: student.middleName || '',
       rollNumber: student.rollNumber,
       class: student.section,
-      attendance: student.attendancePercentage || 100,
-      academicScore: student.overallPercentage || 0,
+      section: student.section,
+      // Include both field name formats for compatibility
+      attendance: attendanceValue,
+      attendancePercentage: attendanceValue,
+      academicScore: academicValue,
+      overallPercentage: academicValue,
       riskLevel: student.riskLevel,
       riskScore: student.riskScore || 0,
       email: student.email,
@@ -767,10 +864,34 @@ router.get('/:id', async (req, res) => {
       photo: student.photo,
       // Include additional details for detailed view
       dateOfBirth: student.dateOfBirth,
+      dateOfAdmission: student.dateOfAdmission,
       gender: student.gender,
+      bloodGroup: student.bloodGroup,
       address: student.address,
       father: student.father,
-      mother: student.mother
+      mother: student.mother,
+      guardian: student.guardian,
+      previousSchool: student.previousSchool,
+      siblings: student.siblings,
+      familyIncomeLevel: student.familyIncomeLevel,
+      distanceFromSchool: student.distanceFromSchool,
+      transportationMode: student.transportationMode,
+      hasHealthIssues: student.hasHealthIssues,
+      healthDetails: student.healthDetails,
+      hasBehavioralIssues: student.hasBehavioralIssues,
+      behavioralDetails: student.behavioralDetails,
+      hasFamilyProblems: student.hasFamilyProblems,
+      familyProblemDetails: student.familyProblemDetails,
+      hasEconomicDistress: student.hasEconomicDistress,
+      economicDistressDetails: student.economicDistressDetails,
+      previousDropoutAttempts: student.previousDropoutAttempts,
+      academicTrend: student.academicTrend,
+      failedSubjectsCount: student.failedSubjectsCount,
+      totalDaysPresent: student.totalDaysPresent || 0,
+      totalDaysAbsent: student.totalDaysAbsent || 0,
+      consecutiveAbsences: student.consecutiveAbsences || 0,
+      lateComingCount: student.lateComingCount || 0,
+      admissionNumber: student.admissionNumber
     };
 
     res.json({

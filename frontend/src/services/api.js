@@ -59,6 +59,8 @@ export const studentsAPI = {
   delete: (id) => api.delete(`/students/${id}`),
   getRiskAnalysis: (id) => api.get(`/students/${id}/risk-analysis`),
   getNextRollNumber: (section) => api.get(`/students/next-roll-number/${section}`),
+  getObservations: (studentId) => api.get(`/admin/students/${studentId}/observations`),
+  createObservation: (data) => api.post('/admin/observations', data),
   bulkUpload: (formData) => {
     return api.post('/students/bulk-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }

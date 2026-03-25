@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, User, Mail, Phone, MapPin, Calendar, Award, 
   TrendingUp, AlertTriangle, BookOpen, Users, FileText,
-  Edit, Download, MessageSquare, Clock, CheckCircle, XCircle
+  Edit, Download, MessageSquare, Clock, CheckCircle, XCircle, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { studentsAPI } from '../services/api';
@@ -19,14 +19,39 @@ const StudentProfile = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [showContactModal, setShowContactModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showAddNoteModal, setShowAddNoteModal] = useState(false);
+  const [notes, setNotes] = useState([]);
+  const [loadingNotes, setLoadingNotes] = useState(false);
 
   console.log('📄 StudentProfile mounted with ID:', id);
 
   useEffect(() => {
     if (id) {
       fetchStudentDetails();
+      fetchStudentNotes();
     }
   }, [id]);
+
+  const fetchStudentNotes = async () => {
+    try {
+      setLoadingNotes(true);
+      const response = await studentsAPI.getObservations(id);
+      console.log('📝 Notes response:', response);
+      
+      // Handle different response structures
+      const notesData = response.data?.data?.observations || 
+                       response.data?.observations || 
+                       response.data?.data || 
+                       [];
+      
+      setNotes(notesData);
+    } catch (error) {
+      console.error('❌ Error fetching notes:', error);
+      // Don't show error toast, just log it
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
 
   const fetchStudentDetails = async () => {
     try {
@@ -54,9 +79,19 @@ const StudentProfile = () => {
       }
       
       console.log('📝 Final student data:', studentData);
-      console.log('📝 Attendance:', studentData?.attendancePercentage);
-      console.log('📝 Academic:', studentData?.overallPercentage);
+      console.log('📝 Attendance:', studentData?.attendancePercentage || studentData?.attendance);
+      console.log('📝 Academic:', studentData?.overallPercentage || studentData?.academicScore);
       console.log('📝 Risk Score:', studentData?.riskScore);
+      
+      // Normalize field names to ensure consistency
+      // Map attendance/academicScore to attendancePercentage/overallPercentage if needed
+      if (studentData) {
+        studentData.attendancePercentage = studentData.attendancePercentage ?? studentData.attendance ?? 0;
+        studentData.overallPercentage = studentData.overallPercentage ?? studentData.academicScore ?? 0;
+        // Also keep the original field names for backward compatibility
+        studentData.attendance = studentData.attendancePercentage;
+        studentData.academicScore = studentData.overallPercentage;
+      }
       
       setStudent(studentData);
     } catch (error) {
@@ -158,8 +193,8 @@ const StudentProfile = () => {
 I am writing to you regarding your child ${formatStudentName(student)} (Roll Number: ${student.rollNumber}, ${formatClassSection(student.section)}).
 
 Current Status:
-- Attendance: ${student.attendancePercentage}%
-- Academic Score: ${student.overallPercentage}%
+- Attendance: ${student.attendancePercentage || student.attendance || 0}%
+- Academic Score: ${student.overallPercentage || student.academicScore || 0}%
 - Risk Level: ${student.riskLevel}
 
 
@@ -234,7 +269,15 @@ Best regards,`;
         {activeTab === 'attendance' && <AttendanceTab student={student} />}
         {activeTab === 'family' && <FamilyTab student={student} />}
         {activeTab === 'risk' && <RiskTab student={student} />}
-        {activeTab === 'notes' && <NotesTab student={student} />}
+        {activeTab === 'notes' && (
+          <NotesTab 
+            student={student} 
+            notes={notes}
+            loadingNotes={loadingNotes}
+            onAddNote={() => setShowAddNoteModal(true)}
+            onRefresh={fetchStudentNotes}
+          />
+        )}
       </div>
 
       {/* Contact Parent Modal */}
@@ -255,6 +298,30 @@ Best regards,`;
           await fetchStudentDetails();
         }}
       />
+
+      {/* Add Note Modal */}
+      {showAddNoteModal && (
+        <AddNoteModal
+          isOpen={showAddNoteModal}
+          onClose={() => setShowAddNoteModal(false)}
+          student={student}
+          onSubmit={async (noteData) => {
+            try {
+              await studentsAPI.createObservation({
+                studentId: student._id,
+                ...noteData
+              });
+              toast.success('Note added successfully!');
+              setShowAddNoteModal(false);
+              await fetchStudentNotes();
+            } catch (error) {
+              console.error('Error adding note:', error);
+              toast.error(error.response?.data?.message || 'Failed to add note');
+              throw error;
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -611,17 +678,85 @@ const RiskTab = ({ student }) => {
 };
 
 // Notes Tab Component
-const NotesTab = ({ student }) => {
+const NotesTab = ({ student, notes, loadingNotes, onAddNote, onRefresh }) => {
   return (
     <div className="space-y-6">
       {/* Notes Section */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Teacher Notes</h3>
-        <div className="text-center py-8 text-gray-500">
-          <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-          <p>No notes available yet</p>
-          <button className="btn-primary mt-4">Add Note</button>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Teacher Notes & Observations</h3>
+          <button onClick={onAddNote} className="btn-primary flex items-center gap-2">
+            <MessageSquare className="w-4 h-4" />
+            Add Note
+          </button>
         </div>
+        
+        {loadingNotes ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="text-gray-500 mt-2">Loading notes...</p>
+          </div>
+        ) : notes && notes.length > 0 ? (
+          <div className="space-y-4">
+            {notes.map((note) => (
+              <div key={note._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-gray-900">{note.title}</h4>
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        note.observationType === 'Behavioral' ? 'bg-purple-100 text-purple-800' :
+                        note.observationType === 'Academic' ? 'bg-blue-100 text-blue-800' :
+                        note.observationType === 'Health' ? 'bg-red-100 text-red-800' :
+                        note.observationType === 'Engagement' ? 'bg-green-100 text-green-800' :
+                        note.observationType === 'Social' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {note.observationType}
+                      </span>
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        note.severity === 'Critical' ? 'bg-red-100 text-red-800' :
+                        note.severity === 'High' ? 'bg-orange-100 text-orange-800' :
+                        note.severity === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {note.severity}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">{note.description}</p>
+                    {note.actionTaken && (
+                      <div className="mt-2 p-2 bg-blue-50 rounded">
+                        <p className="text-xs text-gray-600 font-medium">Action Taken:</p>
+                        <p className="text-sm text-gray-700">{note.actionTaken}</p>
+                      </div>
+                    )}
+                    {note.followUpRequired && (
+                      <div className="mt-2 flex items-center gap-2 text-sm text-orange-600">
+                        <Clock className="w-4 h-4" />
+                        Follow-up required {note.followUpDate ? `by ${new Date(note.followUpDate).toLocaleDateString()}` : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <User className="w-4 h-4" />
+                    <span>{note.teacher?.firstName} {note.teacher?.lastName}</span>
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {new Date(note.createdAt).toLocaleDateString()} at {new Date(note.createdAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+            <p>No notes available yet</p>
+            <button onClick={onAddNote} className="btn-primary mt-4">Add First Note</button>
+          </div>
+        )}
       </div>
 
       {/* Documents Section */}
@@ -688,6 +823,219 @@ const RiskFactorItem = ({ label, value, details }) => {
         {value && details && (
           <p className="text-sm text-gray-600 mt-2">{details}</p>
         )}
+      </div>
+    </div>
+  );
+};
+
+// Add Note Modal Component
+const AddNoteModal = ({ isOpen, onClose, student, onSubmit }) => {
+  const [formData, setFormData] = useState({
+    observationType: 'General',
+    severity: 'Medium',
+    title: '',
+    description: '',
+    actionTaken: '',
+    followUpRequired: false,
+    followUpDate: '',
+    followUpNotes: ''
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.title || !formData.description) {
+      toast.error('Please fill in title and description');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onSubmit(formData);
+      // Reset form
+      setFormData({
+        observationType: 'General',
+        severity: 'Medium',
+        title: '',
+        description: '',
+        actionTaken: '',
+        followUpRequired: false,
+        followUpDate: '',
+        followUpNotes: ''
+      });
+    } catch (error) {
+      // Error is handled in parent
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Add Note for {student?.firstName} {student?.lastName}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Observation Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.observationType}
+                onChange={(e) => setFormData({ ...formData, observationType: e.target.value })}
+                className="input"
+                required
+              >
+                <option value="General">General</option>
+                <option value="Behavioral">Behavioral</option>
+                <option value="Academic">Academic</option>
+                <option value="Health">Health</option>
+                <option value="Engagement">Engagement</option>
+                <option value="Social">Social</option>
+                <option value="Attendance">Attendance</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Severity <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.severity}
+                onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
+                className="input"
+                required
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Critical">Critical</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Title <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              className="input"
+              placeholder="Brief title for the observation"
+              maxLength={100}
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              className="input min-h-[100px]"
+              placeholder="Detailed description of the observation"
+              maxLength={1000}
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {formData.description.length}/1000 characters
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Action Taken (Optional)
+            </label>
+            <textarea
+              value={formData.actionTaken}
+              onChange={(e) => setFormData({ ...formData, actionTaken: e.target.value })}
+              className="input min-h-[80px]"
+              placeholder="What action was taken regarding this observation?"
+              maxLength={500}
+            />
+          </div>
+
+          <div className="border-t border-gray-200 pt-4">
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="checkbox"
+                id="followUpRequired"
+                checked={formData.followUpRequired}
+                onChange={(e) => setFormData({ ...formData, followUpRequired: e.target.checked })}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="followUpRequired" className="text-sm font-medium text-gray-700">
+                Follow-up Required
+              </label>
+            </div>
+
+            {formData.followUpRequired && (
+              <div className="grid grid-cols-2 gap-4 ml-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Follow-up Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.followUpDate}
+                    onChange={(e) => setFormData({ ...formData, followUpDate: e.target.value })}
+                    className="input"
+                    min={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Follow-up Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.followUpNotes}
+                    onChange={(e) => setFormData({ ...formData, followUpNotes: e.target.value })}
+                    className="input"
+                    placeholder="Notes for follow-up"
+                    maxLength={500}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-4 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-outline flex-1"
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn-primary flex-1"
+              disabled={loading}
+            >
+              {loading ? 'Adding...' : 'Add Note'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

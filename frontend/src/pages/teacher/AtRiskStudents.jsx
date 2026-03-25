@@ -103,7 +103,7 @@ const AtRiskStudents = () => {
   }
 
   const handleViewProfile = (student) => {
-    toast.success(`Viewing detailed profile for ${student.firstName} ${student.lastName}`)
+    navigate(`/teacher/students/${student._id || student.id}`)
   }
 
   if (isLoading) return <LoadingSpinner className="h-64" />
@@ -328,7 +328,6 @@ const AtRiskStudents = () => {
                     <button
                       onClick={() => handleViewProfile(student)}
                       className="btn-outline flex items-center gap-2 text-sm"
-                      onClick={() => navigate(`/teacher/students/${student._id || student.id}`)}
                     >
                       <Eye className="w-4 h-4" />
                       View Profile
