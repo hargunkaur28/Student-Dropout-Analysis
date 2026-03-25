@@ -41,17 +41,23 @@ const allowedOrigins = [
 ];
 
 if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
+  // Normalize FRONTEND_URL to remove trailing slash
+  const normalizedFrontendUrl = process.env.FRONTEND_URL.endsWith('/') 
+    ? process.env.FRONTEND_URL.slice(0, -1) 
+    : process.env.FRONTEND_URL;
+  allowedOrigins.push(normalizedFrontendUrl);
 }
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+    
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`CORS blocked for origin: ${origin}. Allowed: ${allowedOrigins.join(', ')}`);
+      callback(null, false); // Return false instead of Error to avoid triggering error handler
     }
   },
   credentials: true,
